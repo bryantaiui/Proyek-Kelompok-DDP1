@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Proyek Kelompok DDP1 — Starter Canvas</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>Homework Monster Game (Starter Canvas)</h1>
+      <p>Template awal untuk tim <strong>Desain</strong>, <strong>Mekanik</strong>, dan <strong>Database</strong>.</p>
+    </header>
+
+    <section class="card">
+      <h2>Tambah Tugas (Test Form)</h2>
+      <form id="task-form">
+        <input id="name" type="text" placeholder="Nama tugas (mis. Lab 8 DDP1)" required />
+        <input id="course" type="text" placeholder="Matkul (mis. DDP1)" />
+        <input id="grade_weight" type="number" step="0.5" min="0" max="100" placeholder="Bobot nilai (%)" value="5" />
+        <input id="difficulty" type="number" min="1" max="5" placeholder="Kesulitan (1-5)" value="3" />
+        <input id="deadline" type="datetime-local" required />
+        <button type="submit">Tambah Monster</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Daftar Monster (Urut Prioritas)</h2>
+      <div id="task-list">Memuat data...</div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
