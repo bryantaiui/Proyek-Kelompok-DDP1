@@ -11,10 +11,14 @@
     <header>
       <h1>Homework Monster Game (Starter Canvas)</h1>
       <p>Template awal untuk tim <strong>Desain</strong>, <strong>Mekanik</strong>, dan <strong>Database</strong>.</p>
+      <div style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
+        <button id="sync-btn" type="button">Sync SCELE Sekarang</button>
+        <span id="sync-status" style="font-size: 13px; color: #555;"></span>
+      </div>
     </header>
 
     <section class="card">
-      <h2>Tambah Tugas (Test Form)</h2>
+      <h2>Tambah Tugas (Manual — Terlihat Semua Mahasiswa)</h2>
       <form id="task-form">
         <input id="name" type="text" placeholder="Nama tugas (mis. Lab 8 DDP1)" required />
         <input id="course" type="text" placeholder="Matkul (mis. DDP1)" />
