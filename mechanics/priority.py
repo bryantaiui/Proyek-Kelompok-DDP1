@@ -32,7 +32,15 @@ def evaluate_task(task: dict, now: datetime | None = None) -> dict:
 
     # Formula placeholder: bobot nilai * kesulitan / urgensi waktu
     urgency = 10.0 / days_left
-    score = round((task.get("grade_weight", 0) * 1.5) + (task.get("difficulty", 1) * 5) + urgency, 2)
+    try:
+        weight = float(task.get("grade_weight") or 0)
+    except (TypeError, ValueError):
+        weight = 0.0
+    try:
+        diff = int(task.get("difficulty") or 1)
+    except (TypeError, ValueError):
+        diff = 1
+    score = round((weight * 1.5) + (diff * 5) + urgency, 2)
 
     if score >= 45:
         monster_tier = "Boss"

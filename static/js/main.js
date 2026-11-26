@@ -1,26 +1,59 @@
-// Starter JS — menghubungkan tampilan dengan REST API Flask (/api/tasks & /api/sync)
+// Starter JS — menghubungkan tampilan dengan REST API Flask (/api/tasks, /api/calendars, /api/sync)
 
 function updateSyncStatus(sync) {
   const el = document.getElementById("sync-status");
   if (!sync || !el) return;
   if (sync.synced) {
-    el.textContent = `Tersinkron SCELE (+${sync.added} baru, ${sync.total} total) pada ${sync.last_sync_at.replace("T", " ")}`;
+    el.textContent = `Tersinkron (+${sync.added} baru, ${sync.total} total) pada ${sync.last_sync_at.replace("T", " ")}`;
   } else if (sync.reason === "throttled" && sync.last_sync_at) {
     el.textContent = `Sync terakhir: ${sync.last_sync_at.replace("T", " ")}`;
   } else if (sync.error) {
-    el.textContent = `Gagal sync SCELE (${sync.error})`;
+    el.textContent = `Gagal sync (${sync.error})`;
   } else if (sync.reason === "no_url") {
-    el.textContent = "SCELE_ICS_URL belum diisi di .env";
+    el.textContent = "Belum ada kalender .ics terdaftar";
   }
 }
 
+async function loadCalendars() {
+  const res = await fetch("/api/calendars");
+  const cals = await res.json();
+  const box = document.getElementById("cal-list");
+  if (!cals.length) {
+    box.textContent = "Belum ada kalender terhubung.";
+    return;
+  }
+  box.innerHTML = cals
+    .map(
+      (c) => `
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #eee;">
+        <span>
+          <strong>${c.name}</strong>
+          <span style="color: #777;">(${c.filter_mode === "all" ? "semua event" : "filter tugas/deadline"})</span>
+          ${c.last_sync_at ? `· sync: ${c.last_sync_at.replace("T", " ")}` : ""}
+        </span>
+        <button onclick="deleteCalendar(${c.id})" style="padding: 3px 8px; cursor: pointer;">Hapus</button>
+      </div>
+    `
+    )
+    .join("");
+}
+
+async function deleteCalendar(id) {
+  await fetch(`/api/calendars/${id}`, { method: "DELETE" });
+  loadCalendars();
+}
+
 async function loadTasks() {
+  const list = document.getElementById("task-list");
   const res = await fetch("/api/tasks");
+  if (!res.ok) {
+    list.innerHTML = `<p style="color:#b91c1c;">Gagal memuat tugas (HTTP ${res.status}). Cek log terminal.</p>`;
+    return;
+  }
   const data = await res.json();
   const tasks = Array.isArray(data) ? data : data.tasks || [];
   updateSyncStatus(data.sync);
 
-  const list = document.getElementById("task-list");
   if (!tasks.length) {
     list.innerHTML = "<p>Belum ada tugas.</p>";
     return;
@@ -82,10 +115,32 @@ async function deleteTask(id) {
 
 document.getElementById("sync-btn").addEventListener("click", async () => {
   const el = document.getElementById("sync-status");
-  el.textContent = "Menyinkronkan dengan SCELE...";
+  el.textContent = "Menyinkronkan kalender...";
   const res = await fetch("/api/sync", { method: "POST" });
   const sync = await res.json();
   updateSyncStatus(sync);
+  loadCalendars();
+  loadTasks();
+});
+
+document.getElementById("cal-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const res = await fetch("/api/calendars", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: document.getElementById("cal-name").value,
+      url: document.getElementById("cal-url").value,
+      filter_mode: document.getElementById("cal-filter").value,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    alert(err.error || "Gagal menambah kalender");
+    return;
+  }
+  e.target.reset();
+  loadCalendars();
   loadTasks();
 });
 
@@ -107,4 +162,5 @@ document.getElementById("task-form").addEventListener("submit", async (e) => {
   loadTasks();
 });
 
+loadCalendars();
 loadTasks();

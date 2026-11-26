@@ -12,10 +12,24 @@
       <h1>Homework Monster Game (Starter Canvas)</h1>
       <p>Template awal untuk tim <strong>Desain</strong>, <strong>Mekanik</strong>, dan <strong>Database</strong>.</p>
       <div style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
-        <button id="sync-btn" type="button">Sync SCELE Sekarang</button>
+        <button id="sync-btn" type="button">Sync Semua Kalender</button>
         <span id="sync-status" style="font-size: 13px; color: #555;"></span>
       </div>
     </header>
+
+    <section class="card">
+      <h2>Sumber Kalender (.ics — SCELE / Google Calendar / Apple Calendar)</h2>
+      <form id="cal-form" style="display: grid; grid-template-columns: 1fr 2fr 1fr auto; gap: 8px; margin-bottom: 12px;">
+        <input id="cal-name" type="text" placeholder="Nama (mis. GCal Neil)" required />
+        <input id="cal-url" type="url" placeholder="Link .ics (Secret iCal / SCELE URL)" required />
+        <select id="cal-filter">
+          <option value="tasks_only">Hanya tugas/quiz/deadline</option>
+          <option value="all">Ambil semua event</option>
+        </select>
+        <button type="submit">Tambah Kalender</button>
+      </form>
+      <div id="cal-list" style="font-size: 13px; color: #444;">Memuat kalender...</div>
+    </section>
 
     <section class="card">
       <h2>Tambah Tugas (Manual — Terlihat Semua Mahasiswa)</h2>

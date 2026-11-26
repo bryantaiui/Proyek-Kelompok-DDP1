@@ -1,7 +1,7 @@
 """Lapisan Database (SQLite) — Area: Database (Neil).
 
 Menyimpan daftar tugas bersama untuk semua mahasiswa AI Major, menggabungkan:
-1. Tugas otomatis dari kalender SCELE (.ics) via database/scele.py
+1. Tugas otomatis dari berbagai kalender .ics (SCELE, Google Calendar, Apple Calendar, dll)
 2. Tugas manual yang ditambahkan langsung di website
 
 Semua fungsi mengembalikan dict/list Python standar agar tim Mekanik (mechanics/priority.py)
@@ -19,16 +19,23 @@ DB_PATH = os.environ.get("DB_PATH", "app.db")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    uid          TEXT UNIQUE,                  -- UID dari SCELE (.ics); NULL untuk tugas manual
+    uid          TEXT UNIQUE,                  -- UID dari .ics; NULL untuk tugas manual
     name         TEXT NOT NULL,                -- nama tugas, mis. "TP 3 DDP1"
-    course       TEXT DEFAULT '',              -- mata kuliah, mis. "DDP1", "Kalkulus"
+    course       TEXT DEFAULT '',              -- mata kuliah / label kalender
     grade_weight REAL NOT NULL DEFAULT 5.0,    -- persentase terhadap nilai akhir semester (0 - 100)
     difficulty   INTEGER NOT NULL DEFAULT 3,   -- tingkat kesulitan (1 = mudah .. 5 = sangat sulit)
     deadline     TEXT NOT NULL,                -- format ISO 8601 WIB, mis. "2026-12-05T23:59:00"
     completed    INTEGER NOT NULL DEFAULT 0,   -- 0 = monster hidup, 1 = monster dikalahkan
-    source       TEXT NOT NULL DEFAULT 'manual', -- 'scele' atau 'manual'
-    is_edited    INTEGER NOT NULL DEFAULT 0,   -- 1 = pernah diedit di website (nama/matkul tidak ditimpa sync)
-    is_deleted   INTEGER NOT NULL DEFAULT 0    -- 1 = dihapus (soft-delete agar sync SCELE tidak menambah ulang)
+    source       TEXT NOT NULL DEFAULT 'manual', -- 'scele', nama kalender, atau 'manual'
+    is_edited    INTEGER NOT NULL DEFAULT 0,   -- 1 = pernah diedit di website
+    is_deleted   INTEGER NOT NULL DEFAULT 0    -- 1 = dihapus (soft-delete agar sync tidak menambah ulang)
+);
+CREATE TABLE IF NOT EXISTS calendars (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT NOT NULL,                -- mis. "SCELE AI Major", "Google Calendar Neil"
+    url          TEXT NOT NULL UNIQUE,         -- link .ics (https:// atau webcal://)
+    filter_mode  TEXT NOT NULL DEFAULT 'tasks_only', -- 'tasks_only' atau 'all'
+    last_sync_at TEXT
 );
 CREATE TABLE IF NOT EXISTS sync_meta (
     key   TEXT PRIMARY KEY,
@@ -55,8 +62,21 @@ def init_db(path=None):
             conn.execute("ALTER TABLE tasks ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
 
 
+def seed_default_calendar_if_empty(path=None):
+    """Jika tabel calendars kosong dan SCELE_ICS_URL ada di .env, daftarkan otomatis."""
+    url = (os.environ.get("SCELE_ICS_URL") or "").strip()
+    if not url:
+        return
+    with get_connection(path) as conn:
+        if conn.execute("SELECT COUNT(*) FROM calendars").fetchone()[0] == 0:
+            conn.execute(
+                "INSERT OR IGNORE INTO calendars (name, url, filter_mode) VALUES (?, ?, 'tasks_only')",
+                ("SCELE AI Major", url),
+            )
+
+
 def seed_sample_if_empty(path=None):
-    """Isi contoh tugas awal hanya jika database kosong dan tidak memakai SCELE."""
+    """Isi contoh tugas awal hanya jika database kosong dan tidak ada kalender."""
     with get_connection(path) as conn:
         if conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] > 0:
             return
@@ -71,6 +91,35 @@ def seed_sample_if_empty(path=None):
             samples,
         )
 
+
+# ---------- CRUD Kalender (.ics) ----------
+
+def get_calendars(path=None):
+    with get_connection(path) as conn:
+        rows = conn.execute("SELECT * FROM calendars ORDER BY id ASC").fetchall()
+        return [dict(r) for r in rows]
+
+
+def add_calendar(name, url, filter_mode="tasks_only", path=None):
+    if filter_mode not in ("tasks_only", "all"):
+        filter_mode = "tasks_only"
+    clean_url = url.strip()
+    with get_connection(path) as conn:
+        cur = conn.execute(
+            "INSERT INTO calendars (name, url, filter_mode) VALUES (?, ?, ?)",
+            (name.strip(), clean_url, filter_mode),
+        )
+        row = conn.execute("SELECT * FROM calendars WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return dict(row)
+
+
+def delete_calendar(cal_id, path=None):
+    with get_connection(path) as conn:
+        cur = conn.execute("DELETE FROM calendars WHERE id = ?", (cal_id,))
+        return cur.rowcount > 0
+
+
+# ---------- CRUD Tugas ----------
 
 def get_all_tasks(path=None):
     with get_connection(path) as conn:
@@ -129,7 +178,7 @@ def toggle_complete(task_id, path=None):
 
 
 def delete_task(task_id, path=None):
-    """Hapus tugas. Tugas SCELE di-soft-delete agar sync berikutnya tidak menambahkannya lagi."""
+    """Hapus tugas. Tugas dari kalender .ics di-soft-delete agar sync tidak menambahkannya lagi."""
     with get_connection(path) as conn:
         row = conn.execute(
             "SELECT uid FROM tasks WHERE id = ? AND is_deleted = 0", (task_id,)
@@ -144,7 +193,7 @@ def delete_task(task_id, path=None):
 
 
 def upsert_scele_tasks(scele_tasks, path=None):
-    """Masukkan tugas baru dari SCELE; tugas lama hanya diperbarui deadline/nama jika belum diedit.
+    """Masukkan tugas baru dari .ics; tugas lama hanya diperbarui deadline/nama jika belum diedit.
     Bobot nilai (grade_weight), kesulitan (difficulty), dan status selesai selalu dipertahankan."""
     added = 0
     updated = 0
@@ -157,8 +206,8 @@ def upsert_scele_tasks(scele_tasks, path=None):
             if existing is None:
                 conn.execute(
                     "INSERT INTO tasks (uid, name, course, grade_weight, difficulty, deadline, source) "
-                    "VALUES (?, ?, ?, ?, ?, ?, 'scele')",
-                    (t["uid"], t["name"], t["course"], t["grade_weight"], t["difficulty"], t["deadline"]),
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (t["uid"], t["name"], t["course"], t["grade_weight"], t["difficulty"], t["deadline"], t["source"]),
                 )
                 added += 1
             elif not existing["is_deleted"]:
@@ -177,9 +226,12 @@ def upsert_scele_tasks(scele_tasks, path=None):
 
 
 def sync_scele_if_needed(force=False, path=None):
-    """Sinkronkan tugas dari SCELE secara otomatis (dibatasi tiap SYNC_INTERVAL_MINUTES).
-    Aman dipanggil saat halaman dibuka: jika gagal jaringan, website tetap berjalan normal."""
-    if not os.environ.get("SCELE_ICS_URL") and not os.environ.get("SCELE_ICS_FILE"):
+    """Sinkronkan tugas dari semua kalender di tabel `calendars` (plus SCELE_ICS_FILE jika ada)."""
+    seed_default_calendar_if_empty(path=path)
+    calendars = get_calendars(path=path)
+    file_path = os.environ.get("SCELE_ICS_FILE")
+
+    if not calendars and not file_path:
         return {"synced": False, "reason": "no_url"}
 
     interval_menit = int(os.environ.get("SYNC_INTERVAL_MINUTES", "15"))
@@ -199,16 +251,55 @@ def sync_scele_if_needed(force=False, path=None):
         except ValueError:
             pass
 
-    try:
-        tasks = scele.fetch_scele_tasks()
-        summary = upsert_scele_tasks(tasks, path=path)
-        now_str = now_wib.strftime("%Y-%m-%dT%H:%M:%S")
-        with get_connection(path) as conn:
-            conn.execute(
-                "INSERT INTO sync_meta (key, value) VALUES ('last_sync_at', ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (now_str,),
+    now_str = now_wib.strftime("%Y-%m-%dT%H:%M:%S")
+    total_added = 0
+    total_updated = 0
+    total_events = 0
+    errors = []
+
+    if file_path:
+        try:
+            with open(file_path, "rb") as f:
+                s = upsert_scele_tasks(scele.parse_ics(f.read()), path=path)
+            total_added += s["added"]
+            total_updated += s["updated"]
+            total_events += s["total"]
+        except Exception as e:
+            errors.append(f"file: {type(e).__name__}: {e}")
+
+    for cal in calendars:
+        try:
+            items = scele.fetch_ics_url(
+                cal["url"],
+                filter_mode=cal["filter_mode"],
+                source_name=cal["name"],
             )
-        return {"synced": True, **summary, "last_sync_at": now_str}
-    except Exception as e:
-        return {"synced": False, "error": f"{type(e).__name__}: {e}"}
+            s = upsert_scele_tasks(items, path=path)
+            total_added += s["added"]
+            total_updated += s["updated"]
+            total_events += s["total"]
+            with get_connection(path) as conn:
+                conn.execute("UPDATE calendars SET last_sync_at = ? WHERE id = ?", (now_str, cal["id"]))
+        except Exception as e:
+            errors.append(f"{cal['name']}: {type(e).__name__}: {e}")
+
+    with get_connection(path) as conn:
+        conn.execute(
+            "INSERT INTO sync_meta (key, value) VALUES ('last_sync_at', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (now_str,),
+        )
+
+    if errors and total_events == 0:
+        return {"synced": False, "error": "; ".join(errors)}
+
+    res = {
+        "synced": True,
+        "added": total_added,
+        "updated": total_updated,
+        "total": total_events,
+        "last_sync_at": now_str,
+    }
+    if errors:
+        res["warnings"] = errors
+    return res
